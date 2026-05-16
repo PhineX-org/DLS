@@ -326,15 +326,18 @@ nav{background:var(--s1);border-bottom:1px solid var(--br);position:sticky;top:6
 
 <script>
 const FB_CFG={
-  apiKey: "AIzaSyD4s4QOFphv0als6u_XZbtbIla2Yk7GslE",
-    authDomain: "dls-tes.firebaseapp.com",
-    projectId: "dls-tes",
-    storageBucket: "dls-tes.firebasestorage.app",
-    messagingSenderId: "205544215019",
-    appId: "1:205544215019:web:a011bb3ceebb2cb68ec9ae"
+  apiKey: "AIzaSyDM3e_u1nZFv3tZc_PFioPr1GYrMKfs7pY",
+  authDomain: "dls-tour.firebaseapp.com",
+  projectId: "dls-tour",
+  storageBucket: "dls-tour.firebasestorage.app",
+  messagingSenderId: "627648716601",
+  appId: "1:627648716601:web:9c6ba12dd7aeb3c4c492e8",
+  measurementId: "G-WYMEP7P38Z"
 };
+firebase.initializeApp(FB_CFG);
 
-const TM={barcelona:{name:'FC Barcelona',short:'FCB'},futurefc:{name:'Future FC',short:'FFC'},liverpool:{name:'Liverpool FC',short:'LIV'},rbleipzig:{name:'RB Leipzig',short:'RBL'},tofifc:{name:'Tofi FC',short:'TFC'},ldfc:{name:'LEGEND DIAMOND FC',short:'LDF'}};
+
+const TM={barcelona:{name:'FC Barcelona',short:'BAR'},futurefc:{name:'Future FC',short:'FUT'},liverpool:{name:'Liverpool FC',short:'LIV'},rbleipzig:{name:'RB Leipzig',short:'RBL'},tofifc:{name:'Tofi FC',short:'TOF'},elahly:{name:' LDFC',short:'LFC'}};
 const FMT={league:'League',group:'Group Stage',knockout:'Knockout',group_knock:'Groups+KO',league_knock:'League+KO'};
 const SLBL={not_started:'Scheduled',live:'● LIVE',ht:'Half Time',ft:'Full Time',delayed:'Delayed',canceled:'Canceled'};
 const SCLS={not_started:'ss-ns',live:'ss-live',ht:'ss-ht',ft:'ss-ft',delayed:'ss-delayed',canceled:'ss-canceled'};
@@ -427,7 +430,7 @@ function init(){
 
 function updateHeader(){
   if(!cfg)return;
-  document.getElementById('hTitle').textContent=cfg.name||'DLS 2026 TOURNAMENT';
+  document.getElementById('hTitle').textContent=cfg.name||'E Football 2026 TOURNAMENT';
   document.getElementById('hSub').textContent=FMT[cfg.format]||'';
   document.getElementById('hFmt').textContent=FMT[cfg.format]||'';
 }
@@ -491,7 +494,7 @@ function renderOverview(el){
     <div class="stat-box"><span class="sb-val">${(cfg.teams||[]).length}</span><span class="sb-lbl">Teams</span></div>
   </div>
   ${live.length?`<div class="card" style="border-color:var(--green)"><div class="card-hd">🔴 Live Now</div><div class="match-grid">${live.map(matchCard).join('')}</div></div>`:''}
-  ${upcoming.length?`<div class="card"><div class="card-hd">🔮 Upcoming</div><div class="match-grid">${upcoming.map(matchCard).join('')}</div></div>`:''}
+  ${upcoming.length?`<div class="card"><div class="card-hd">✨ Upcoming</div><div class="match-grid">${upcoming.map(matchCard).join('')}</div></div>`:''}
   ${recent.length?`<div class="card"><div class="card-hd">✅ Recent Results</div><div class="match-grid">${recent.map(matchCard).join('')}</div></div>`:''}`;
 }
 
@@ -520,24 +523,33 @@ function renderGroup(el,lbl){
 /* ── BRACKET ── */
 function renderBracket(el){
   const kms=matches.filter(m=>m.stage==='knockout');
-  if(!kms.length){el.innerHTML=`<div class="card"><div class="empty"><span>🏆</span><p>Knockout bracket appears after group/league stage</p></div></div>`;return;}
-  const rounds=[...new Set(kms.map(m=>m.round))];
+  if(!kms.length){el.innerHTML=`<div class="card"><div class="empty"><span>🏆</span><p>Knockout bracket appears after group/league stage is complete</p></div></div>`;return;}
+
+  // Sort rounds by roundNum so earliest rounds appear first (left)
+  const roundMap=new Map();
+  kms.forEach(m=>{if(!roundMap.has(m.round))roundMap.set(m.round,m.roundNum||0);});
+  const rounds=[...roundMap.entries()].sort((a,b)=>a[1]-b[1]).map(e=>e[0]);
+
   el.innerHTML=`<div class="card" style="padding:0;overflow:hidden">
   <div class="bwrap"><div class="bracket">
-  ${rounds.map(rnd=>{
+  ${rounds.map((rnd,ri)=>{
+    const isLast=ri===rounds.length-1;
     const rms=kms.filter(m=>m.round===rnd).sort((a,b)=>(a.matchIdx||0)-(b.matchIdx||0));
-    return`<div class="b-round"><div class="b-rnd-hd">${rnd}</div><div class="b-slots">
+    return`<div class="b-round">
+    <div class="b-rnd-hd">${rnd}${isLast?' 🏆':''}</div>
+    <div class="b-slots">
     ${rms.map(m=>{
       const h=TM[m.homeTeam],a=m.awayTeam?TM[m.awayTeam]:null;
       const hw=m.status==='ft'&&m.homeScore>m.awayScore,aw=m.status==='ft'&&m.awayScore>m.homeScore;
-      return`<div class="b-match" onclick="openMM('${m.id}')">
-        <div class="b-team ${!m.homeTeam?'tbd':''} ${hw?'win':''}">${m.homeTeam?lg(m.homeTeam,22):'<span style="color:var(--t3);font-size:18px">?</span>'}
+      const isDone=m.status==='ft';
+      return`<div class="b-match-wrap"><div class="b-match ${isDone?'b-done':''}" onclick="openMM('${m.id}')">
+        <div class="b-team ${!m.homeTeam?'tbd':''} ${hw?'win':''}">${m.homeTeam?lg(m.homeTeam,22):'<span style="color:var(--t3);font-size:16px">?</span>'}
           <span style="flex:1;font-size:11px;font-weight:700">${h?.name||'TBD'}</span>
-          <span class="b-sc">${m.homeScore!=null?m.homeScore:''}</span></div>
-        <div class="b-team ${!m.awayTeam?'tbd':''} ${aw?'win':''}">${m.awayTeam?lg(m.awayTeam,22):'<span style="color:var(--t3);font-size:18px">?</span>'}
+          <span class="b-sc">${m.homeScore!=null?m.homeScore:'–'}</span></div>
+        <div class="b-team ${!m.awayTeam?'tbd':''} ${aw?'win':''}">${m.awayTeam?lg(m.awayTeam,22):'<span style="color:var(--t3);font-size:16px">?</span>'}
           <span style="flex:1;font-size:11px;font-weight:700">${a?.name||'TBD'}</span>
-          <span class="b-sc">${m.awayScore!=null?m.awayScore:''}</span></div>
-      </div>`;
+          <span class="b-sc">${m.awayScore!=null?m.awayScore:'–'}</span></div>
+      </div>${!isLast?'<div class="b-connector"></div>':''}</div>`;
     }).join('')}
     </div></div>`;
   }).join('')}

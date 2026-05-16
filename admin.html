@@ -355,8 +355,8 @@ select{cursor:pointer}
 <div id="loginScreen">
   <div class="login-wrap">
     <div class="ico">⚽</div>
-    <h1>DLS ADMIN</h1>
-    <p>DLS 2026 Tournament Control Panel</p>
+    <h1>E Football ADMIN</h1>
+    <p>E Football 2026 Tournament Control Panel</p>
     <input type="password" id="pwIn" placeholder="Admin Password" onkeydown="if(event.key==='Enter')doLogin()">
     <button class="btn btn-block" onclick="doLogin()">ENTER CONTROL PANEL</button>
     <p id="loginErr">❌ Wrong password</p>
@@ -367,7 +367,7 @@ select{cursor:pointer}
 <div id="app" style="display:none">
 <header>
   <span class="h-logo">⚽</span>
-  <h1>DLS ADMIN</h1>
+  <h1>E Football ADMIN</h1>
   <span class="h-pill" id="hPill">No Tournament</span>
   <div class="h-right">
     <span id="hFmt" style="color:var(--acc);font-weight:700;font-size:13px"></span>
@@ -482,6 +482,13 @@ select{cursor:pointer}
     <!-- SETTINGS -->
     <div id="tab-settings" style="display:none">
       <div class="card"><div class="card-hd"><div class="card-hd-left">📋 Tournament Info</div></div><div id="cfgInfo"></div></div>
+      
+      <div class="card" id="advKnockCard" style="border-color:var(--neon-blue)">
+        <div class="card-hd"><div class="card-hd-left">🏆 Advance to Knockout</div></div>
+        <p style="color:var(--t2);font-size:13px;margin-bottom:14px">Automatically reads the current group or league standings, seeds the top qualified teams, and builds a full knockout bracket with proper round labels and winner-advancement links. Run this after all qualifying matches are complete. You can re-run it at any time to rebuild the bracket.</p>
+        <button class="btn btn-outline" style="border-color:var(--neon-blue);color:var(--neon-blue)" onclick="advanceToKnockout()">🚀 Populate Bracket</button>
+      </div>
+
       <div class="danger-box"><h3>⚠ Danger Zone</h3><p>Permanently deletes all tournament data — matches, scores, lineups and player data.</p><button class="btn btn-red" onclick="doReset()">🗑 Delete Everything</button></div>
     </div>
   </div>
@@ -690,25 +697,26 @@ select{cursor:pointer}
 // ═══════════════════════════════════════
 //  FIREBASE CONFIG
 // ═══════════════════════════════════════
-const FB_CFG = {
-  apiKey: "AIzaSyD4s4QOFphv0als6u_XZbtbIla2Yk7GslE",
-    authDomain: "dls-tes.firebaseapp.com",
-    projectId: "dls-tes",
-    storageBucket: "dls-tes.firebasestorage.app",
-    messagingSenderId: "205544215019",
-    appId: "1:205544215019:web:a011bb3ceebb2cb68ec9ae"
+const FB_CFG={
+  apiKey: "AIzaSyDM3e_u1nZFv3tZc_PFioPr1GYrMKfs7pY",
+  authDomain: "dls-tour.firebaseapp.com",
+  projectId: "dls-tour",
+  storageBucket: "dls-tour.firebasestorage.app",
+  messagingSenderId: "627648716601",
+  appId: "1:627648716601:web:9c6ba12dd7aeb3c4c492e8",
+  measurementId: "G-WYMEP7P38Z"
 };
 const ADMIN_PW = "ADMIN26";
 const GEMINI_WORKER = 'https://super-paper-1cd0.ahmedelgoharymessi.workers.dev/';
 
 // ═══════ TEAMS META ═══════
 const TM = {
-  barcelona: { name:'FC Barcelona', short:'FCB' },
-  futurefc:  { name:'Future FC',    short:'FFC' },
+  barcelona: { name:'FC Barcelona', short:'BAR' },
+  futurefc:  { name:'Future FC',    short:'FUT' },
   liverpool: { name:'Liverpool FC', short:'LIV' },
   rbleipzig: { name:'RB Leipzig',   short:'RBL' },
-  tofifc:    { name:'Tofi FC',      short:'TFC' },
-  ldfc:    { name:'LEGEND DIAMOND FC',      short:'LDF' },
+  tofifc:    { name:'Tofi FC',      short:'TOF' },
+  elahly:    { name:' LDFC',      short:'LFC' },
 };
 const ALL_IDS = Object.keys(TM);
 const FMT_NAMES = {league:'League',group:'Group Stage',knockout:'Knockout',group_knock:'Groups+KO',league_knock:'League+KO'};
@@ -1052,13 +1060,11 @@ async function doGenerate(){
       const slice=order.filter((_,i)=>i%cfg.groups===g);
       addLeague(slice,lbl,`grp${lbl}`);
     }
-    // Placeholder KO matches — will be filled after group stage
-    const koN=Math.min(cfg.groups*2,q);
-    buildKOMatches(Array(koN).fill(null)).forEach(m=>allMatches.push(m));
+    // KO bracket is built later via "Advance to Knockout" in Settings
   }
   else if(fmt==='league_knock'){
     addLeague(order,null,'league');
-    buildKOMatches(Array(cfg.koTeams).fill(null)).forEach(m=>allMatches.push(m));
+    // KO bracket is built later via "Advance to Knockout" in Settings
   }
 
   try{
@@ -1191,6 +1197,89 @@ function renderStandings(){
   }else{el.innerHTML='<div class="card"><p style="color:var(--t2)">No league standings for knockout format.</p></div>';}
 }
 
+// ═══════ ADVANCE TO KNOCKOUT ═══════
+async function advanceToKnockout() {
+  const btn = document.querySelector('#advKnockCard .btn');
+  if (!curConfig) return toast('No tournament config found', 'err');
+
+  const fmt = curConfig.format;
+  if (!['group_knock','league_knock'].includes(fmt))
+    return toast('This tournament format does not use a knockout stage', 'warn');
+
+  if (!confirm('This will rebuild the knockout bracket from current standings. Continue?')) return;
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Building bracket…';
+
+  try {
+    const teams = curConfig.teamOrder || curConfig.teams || [];
+    let qualifiedTeams = [];
+
+    // ── 1. DETERMINE QUALIFIED TEAMS ──────────────────────────────────
+    if (fmt === 'league_knock') {
+      const std = calcStd(teams, curMatches.filter(m => m.stage === 'league'));
+      const koCount = parseInt(curConfig.koTeams) || 4;
+      qualifiedTeams = std.slice(0, koCount).map(r => r.t);
+
+    } else { // group_knock
+      const nGroups = curConfig.groups || 2;
+      const totalQualify = curConfig.qualifyCount || qualifyCount(teams.length);
+      const qPerGroup = Math.ceil(totalQualify / nGroups);
+
+      // Collect per-group standings
+      const byGroup = [];
+      for (let i = 0; i < nGroups; i++) {
+        const lbl = String.fromCharCode(65 + i);
+        const gTeams = teams.filter((_, j) => j % nGroups === i);
+        const std = calcStd(gTeams, curMatches.filter(m => m.group === lbl));
+        byGroup.push(std.slice(0, qPerGroup).map(r => r.t));
+      }
+
+      // Interleave seeding: A1, B1, A2, B2… so same-group teams can't meet until Final
+      const maxPer = Math.max(...byGroup.map(g => g.length));
+      for (let pos = 0; pos < maxPer; pos++)
+        for (let g = 0; g < nGroups; g++)
+          if (byGroup[g][pos]) qualifiedTeams.push(byGroup[g][pos]);
+    }
+
+    if (qualifiedTeams.length < 2)
+      return toast('Not enough qualified teams yet — complete more group/league matches', 'warn');
+
+    // ── 2. DELETE OLD KO MATCHES ───────────────────────────────────────
+    const oldKO = curMatches.filter(m => m.stage === 'knockout');
+    if (oldKO.length) {
+      const delBatch = db.batch();
+      oldKO.forEach(m => delBatch.delete(db.collection('matches').doc(m.id)));
+      await delBatch.commit();
+    }
+
+    // ── 3. BUILD PROPER BRACKET ────────────────────────────────────────
+    const koMatches = buildKOMatches(qualifiedTeams);
+    if (!koMatches.length) return toast('Could not build bracket — check team count', 'err');
+
+    // Offset matchIdx so KO matches sort after all league/group matches
+    const baseIdx = Math.max(0, ...curMatches
+      .filter(m => m.stage !== 'knockout')
+      .map(m => m.matchIdx || 0)) + 1;
+
+    const batch = db.batch();
+    koMatches.forEach((m, i) => {
+      m.matchIdx = baseIdx + i;
+      batch.set(db.collection('matches').doc(m.id), m);
+    });
+    await batch.commit();
+
+    const roundNames = [...new Set(koMatches.map(m => m.round))];
+    toast(`🎊 Knockout bracket ready! ${qualifiedTeams.length} teams → ${roundNames.join(' · ')}`);
+
+  } catch (e) {
+    toast('❌ Error: ' + e.message, 'err');
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚀 Populate Bracket';
+  }
+}
 // ═══════ SCOREBOARD ═══════
 function renderScoreboard(){
   const el=document.getElementById('scoreboardBox');if(!el)return;
@@ -1229,27 +1318,34 @@ function renderScoreboard(){
 function renderBracket(){
   const grid=document.getElementById('bracketGrid');if(!grid)return;
   const kms=curMatches.filter(m=>m.stage==='knockout');
-  if(!kms.length){grid.innerHTML='<p style="color:var(--t2);padding:20px">No knockout matches yet</p>';return;}
-  const rounds=[...new Set(kms.map(m=>m.round))];
+  if(!kms.length){grid.innerHTML='<p style="color:var(--t2);padding:20px;text-align:center">No knockout matches yet.<br><span style="font-size:12px;color:var(--t3)">Go to Settings → Advance to Knockout after group/league stage.</span></p>';return;}
+
+  // Sort rounds by roundNum (ascending = earliest rounds first)
+  const roundMap=new Map();
+  kms.forEach(m=>{if(!roundMap.has(m.round))roundMap.set(m.round,m.roundNum||0);});
+  const rounds=[...roundMap.entries()].sort((a,b)=>a[1]-b[1]).map(e=>e[0]);
+
   grid.innerHTML='';
-  rounds.forEach(rnd=>{
+  rounds.forEach((rnd,ri)=>{
     const rms=kms.filter(m=>m.round===rnd).sort((a,b)=>(a.matchIdx||0)-(b.matchIdx||0));
+    const isLast=ri===rounds.length-1;
     const rdiv=document.createElement('div');rdiv.className='b-round';
-    rdiv.innerHTML=`<div class="b-rnd-hd">${rnd}</div><div class="b-slots">${rms.map(m=>{
+    rdiv.innerHTML=`<div class="b-rnd-hd">${rnd}${isLast?' 🏆':''}</div><div class="b-slots">${rms.map(m=>{
       const h=TM[m.homeTeam],a=m.awayTeam?TM[m.awayTeam]:null;
       const hw=m.status==='ft'&&m.homeScore>m.awayScore,aw=m.status==='ft'&&m.awayScore>m.homeScore;
-      return`<div class="b-match" onclick="openMM('${m.id}')">
+      const isDone=m.status==='ft';
+      return`<div class="b-match-wrap"><div class="b-match ${isDone?'b-done':''}" onclick="openMM('${m.id}')">
         <div class="b-team ${m.homeTeam?'':'tbd'} ${hw?'win':''}">
-          ${m.homeTeam?lo(m.homeTeam,22):'<span style="font-size:18px;color:var(--t3)">?</span>'}
+          ${m.homeTeam?lo(m.homeTeam,22):'<span style="font-size:16px;color:var(--t3)">?</span>'}
           <span style="flex:1;font-size:12px;font-weight:700">${h?.name||'TBD'}</span>
-          <span class="b-sc">${m.homeScore!=null?m.homeScore:''}</span>
+          <span class="b-sc ${hw?'b-sc-win':''}">${m.homeScore!=null?m.homeScore:'–'}</span>
         </div>
         <div class="b-team ${m.awayTeam?'':'tbd'} ${aw?'win':''}">
-          ${m.awayTeam?lo(m.awayTeam,22):'<span style="font-size:18px;color:var(--t3)">?</span>'}
+          ${m.awayTeam?lo(m.awayTeam,22):'<span style="font-size:16px;color:var(--t3)">?</span>'}
           <span style="flex:1;font-size:12px;font-weight:700">${a?.name||'TBD'}</span>
-          <span class="b-sc">${m.awayScore!=null?m.awayScore:''}</span>
+          <span class="b-sc ${aw?'b-sc-win':''}">${m.awayScore!=null?m.awayScore:'–'}</span>
         </div>
-      </div>`;
+      </div>${!isLast?'<div class="b-connector"></div>':''}</div>`;
     }).join('')}</div>`;
     grid.appendChild(rdiv);
   });
@@ -1412,7 +1508,7 @@ function closePM(){document.getElementById('playerModal').classList.remove('show
 // ═══════ GEMINI AI ROSTER ═══════
 async function generateAIRoster(teamId){
   const teamName=TM[teamId]?.name||teamId;
-  const prompt=`Generate a realistic DLS 2026 squad of 18 players for ${teamName}. Return ONLY a valid JSON array (no markdown, no explanation) with this exact structure for each player:
+  const prompt=`Generate a realistic E Football 2026 squad of 18 players for ${teamName}. Return ONLY a valid JSON array (no markdown, no explanation) with this exact structure for each player:
 {"id":"p1","name":"Full Name","position":"ST","rating":87,"nationality":"Brazil","role":"starter","pace":88,"shooting":85,"passing":72,"dribbling":84,"defending":30,"physical":78}
 Include: 1 GK, 2 CB, 1 LB, 1 RB, 1 CDM, 2 CM, 1 CAM, 1 LW, 1 RW, 2 ST (as starters) and 5 subs with role "sub".
 Make ratings realistic: 75-92. Return only JSON array.`;
@@ -1481,28 +1577,65 @@ async function saveMM(){
   if(!editMatchId)return;
   const status=document.getElementById('mStatus').value;
   const data={date:document.getElementById('mDate').value||'',time:document.getElementById('mTime').value||'',status};
+
   if(['live','ht','ft'].includes(status)){
     const hs=parseInt(document.getElementById('mHS').value);
     const as=parseInt(document.getElementById('mAS').value);
     data.homeScore=isNaN(hs)?null:hs;
     data.awayScore=isNaN(as)?null:as;
   }
-  if(status==='ft'){
-    data.videoUrl=document.getElementById('mVid').value||null;
-    if(data.homeScore!=null&&data.awayScore!=null)
-      data.winner=data.homeScore>data.awayScore?editMatch.homeTeam:data.awayScore>data.homeScore?editMatch.awayTeam:null;
-  }
+
+  // Attach events
   data.events=editEvents;
-  // Recalculate score from events
+
+  // If goals were recorded via events, let them override the manual score fields
   const goals=editEvents.filter(e=>e.type==='goal'||e.type==='penalty');
   if(goals.length&&['live','ht','ft'].includes(status)){
-    data.homeScore=goals.filter(g=>g.teamId===editMatch.homeTeam).length;
-    data.awayScore=goals.filter(g=>g.teamId===editMatch.awayTeam).length;
+    // Own goals count for the OPPONENT
+    const ownGoals=editEvents.filter(e=>e.type==='own_goal');
+    const hGoals=goals.filter(g=>g.teamId===editMatch.homeTeam).length
+                +ownGoals.filter(g=>g.teamId===editMatch.awayTeam).length;
+    const aGoals=goals.filter(g=>g.teamId===editMatch.awayTeam).length
+                +ownGoals.filter(g=>g.teamId===editMatch.homeTeam).length;
+    data.homeScore=hGoals;
+    data.awayScore=aGoals;
     document.getElementById('mHS').value=data.homeScore;
     document.getElementById('mAS').value=data.awayScore;
   }
-  try{await db.collection('matches').doc(editMatchId).update(data);toast('✅ Match saved!');}
-  catch(e){toast('Error: '+e.message,'err');}
+
+  // Determine winner AFTER final score is known
+  if(status==='ft'){
+    data.videoUrl=document.getElementById('mVid').value||null;
+    if(data.homeScore!=null&&data.awayScore!=null){
+      if(data.homeScore>data.awayScore)      data.winner=editMatch.homeTeam;
+      else if(data.awayScore>data.homeScore) data.winner=editMatch.awayTeam;
+      else                                    data.winner=null; // draw — no auto-advance
+    }
+  }
+
+  try{
+    // 1. Save the current match
+    await db.collection('matches').doc(editMatchId).update(data);
+
+    // 2. Auto-advance winner to the next knockout match
+    if(status==='ft'&&data.winner&&editMatch.stage==='knockout'&&editMatch.nextMatchId){
+      // Fetch the next match live from Firestore (don't rely on potentially-stale curMatches)
+      const nextSnap=await db.collection('matches').doc(editMatch.nextMatchId).get();
+      if(nextSnap.exists){
+        const nextData=nextSnap.data();
+        const updateNext={};
+        if(nextData.pendingHome===editMatchId)      updateNext.homeTeam=data.winner;
+        else if(nextData.pendingAway===editMatchId) updateNext.awayTeam=data.winner;
+        if(Object.keys(updateNext).length)
+          await db.collection('matches').doc(editMatch.nextMatchId).update(updateNext);
+      }
+    }
+
+    toast('✅ Match saved!');
+    closeMM();
+  }catch(e){
+    toast('Error: '+e.message,'err');
+  }
 }
 
 async function saveLineup(){
@@ -1667,7 +1800,7 @@ function renderCfgInfo(){
   if(!curConfig)return;
   const el=document.getElementById('cfgInfo');if(!el)return;
   el.innerHTML=`<table style="width:100%;border-collapse:collapse">
-    <tr><td style="padding:10px;border-bottom:1px solid var(--br);color:var(--t2);font-size:13px;font-weight:700">Name</td><td style="padding:10px;border-bottom:1px solid var(--br)">${curConfig.name||'DLS Tournament'}</td></tr>
+    <tr><td style="padding:10px;border-bottom:1px solid var(--br);color:var(--t2);font-size:13px;font-weight:700">Name</td><td style="padding:10px;border-bottom:1px solid var(--br)">${curConfig.name||'E Football Tournament'}</td></tr>
     <tr><td style="padding:10px;border-bottom:1px solid var(--br);color:var(--t2);font-size:13px;font-weight:700">Format</td><td style="padding:10px;border-bottom:1px solid var(--br)">${FMT_NAMES[curConfig.format]||''}</td></tr>
     <tr><td style="padding:10px;border-bottom:1px solid var(--br);color:var(--t2);font-size:13px;font-weight:700">Teams</td><td style="padding:10px;border-bottom:1px solid var(--br)">${(curConfig.teams||[]).length}</td></tr>
     <tr><td style="padding:10px;border-bottom:1px solid var(--br);color:var(--t2);font-size:13px;font-weight:700">Total Matches</td><td style="padding:10px;border-bottom:1px solid var(--br)">${curMatches.length}</td></tr>
